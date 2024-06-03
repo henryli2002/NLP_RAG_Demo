@@ -1,13 +1,7 @@
-# -*- coding: UTF-8 -*-
-"""
-@Project ：rag 
-@File    ：model_response.py
-@Author  ：zfk
-@Date    ：2024/5/8 11:45
-"""
+import openai
+from typing import Any
 import requests
 import json
-from typing import Any
 from llama_index.core.llms import (
     CustomLLM,
     CompletionResponse,
@@ -17,6 +11,55 @@ from llama_index.core.llms import (
 from llama_index.core.llms.callbacks import llm_completion_callback
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+class OpenAIModel:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.client = openai.OpenAI(api_key=api_key)
+
+    def chat(self, prompt, max_tokens=256, temperature=1.0, top_p=1.0):
+        messages=[
+                {"role": "system", "content": "You are a helpful assistant designed to output concise and brief answers."},
+                {"role": "user", "content": prompt}
+            ]
+        response = self.client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=0.5
+        )
+        answer = response.choices[0].message.content.strip()
+        
+        return answer
+
+class OpenaiApiLLM(CustomLLM):
+    context_window = 4096  # GPT-3.5-turbo 的上下文窗口大小
+    num_output = 256
+    model = "gpt-3.5-turbo"
+    model_name = "OpenAI GPT-3.5 Turbo"
+
+    def __init__(self, api_key):
+        super().__init__()
+        self.model = OpenAIModel(api_key)
+
+    @property
+    def metadata(self) -> LLMMetadata:
+        """Get LLM metadata."""
+        return LLMMetadata(
+            context_window=self.context_window,
+            num_output=self.num_output,
+            model_name=self.model_name,
+        )
+
+    @llm_completion_callback()  # 回调函数
+    def complete(self, prompt: str, **kwargs: Any) -> CompletionResponse:
+        response = self.model.chat(prompt, max_tokens=self.num_output)
+        return CompletionResponse(text=response)
+
+    @llm_completion_callback()
+    def stream_complete(self, prompt: str, **kwargs: Any) -> CompletionResponseGen:
+        response = self.model.chat(prompt, max_tokens=self.num_output)
+        for token in response.split():
+            yield CompletionResponse(text=token, delta=token)
 
 class ApiModel:
     def __init__(self, api_key, secret_key):
@@ -38,7 +81,7 @@ class ApiModel:
         response = requests.request("POST", url, headers=headers, data=payload)
         return response.json().get("access_token")
 
-    def chat(self, prompt, top_p=0.5, top_k=5, temperature=1.0, penalty_score=1, ):
+    def chat(self, prompt, top_p=0.5, top_k=5, temperature=1.0, penalty_score=1):
         payload = json.dumps({
             "messages": [
                 {
@@ -46,7 +89,7 @@ class ApiModel:
                     "content": prompt
                 }
             ],
-            'top_p': 0.5, 'top_k': 5, 'temperature': 1.0, 'penalty_score': 1
+            'top_p': top_p, 'top_k': top_k, 'temperature': temperature, 'penalty_score': penalty_score
         })
         headers = {'Content-Type': 'application/json'}
         response = requests.request("POST", self.Yi_34b_chat_url, headers=headers, data=payload)
@@ -80,7 +123,6 @@ class MyLocalLLM(CustomLLM):
     @property
     def metadata(self) -> LLMMetadata:
         """Get LLM metadata."""
-        # 得到LLM的元数据
         return LLMMetadata(
             context_window=self.context_window,
             num_output=self.num_output,
@@ -89,18 +131,13 @@ class MyLocalLLM(CustomLLM):
 
     @llm_completion_callback()  # 回调函数
     def complete(self, prompt: str, **kwargs: Any) -> CompletionResponse:
-        # 完成函数
         inputs = self.tokenizer.encode(prompt, return_tensors='pt').cuda()
         outputs = self.model.generate(inputs, max_length=self.num_output)
         response = self.tokenizer.decode(outputs[0])
         return CompletionResponse(text=response)
 
     @llm_completion_callback()
-    def stream_complete(
-            self, prompt: str, **kwargs: Any
-    ) -> CompletionResponseGen:
-        # 流式完成函数
-        print("流式完成函数")
+    def stream_complete(self, prompt: str, **kwargs: Any) -> CompletionResponseGen:
         inputs = self.tokenizer.encode(prompt, return_tensors='pt').cuda()  # GPU方式
         outputs = self.model.generate(inputs, max_length=self.num_output)
         response = self.tokenizer.decode(outputs[0])
@@ -121,7 +158,6 @@ class MyApiLLM(CustomLLM):
     @property
     def metadata(self) -> LLMMetadata:
         """Get LLM metadata."""
-        # 得到LLM的元数据
         return LLMMetadata(
             context_window=self.context_window,
             num_output=self.num_output,
@@ -130,22 +166,29 @@ class MyApiLLM(CustomLLM):
 
     @llm_completion_callback()  # 回调函数
     def complete(self, prompt: str, **kwargs: Any) -> CompletionResponse:
-
+        # 截断超过8000字符的输入
+        if len(prompt) > 8000:
+            prompt = prompt[:8000]
+        
         response = self.model.chat(prompt)
         return CompletionResponse(text=response)
 
     @llm_completion_callback()
-    def stream_complete(
-            self, prompt: str, **kwargs: Any
-    ) -> CompletionResponseGen:
-        # 流式完成函数
+    def stream_complete(self, prompt: str, **kwargs: Any) -> CompletionResponseGen:
+        # 截断超过8000字符的输入
+        if len(prompt) > 8000:
+            prompt = prompt[:8000]
+
         response = self.model.chat(prompt)
         for token in response:
             yield CompletionResponse(text=token, delta=token)
 
 
+
 if __name__ == '__main__':
-    api_key = ""
-    secret_key = ""
-    my_api_llm = MyApiLLM(api_key, secret_key)
-    print(my_api_llm.complete('你好'))
+    api_key = "your_openai_api_key"
+    openai_api_llm = OpenaiApiLLM(api_key)
+    my_api_llm = MyApiLLM(api_key)
+
+    print("OpenaiApiLLM Response:", openai_api_llm.complete('你好，最近怎么样？'))
+    print("MyApiLLM Response:", my_api_llm.complete('你好，最近怎么样？'))

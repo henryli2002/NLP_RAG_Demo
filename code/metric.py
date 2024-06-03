@@ -25,7 +25,7 @@ def metric(pred: str, answer_list: list[str]):
 
 
 if __name__ == '__main__':
-    with open('../data/crag_200_result.jsonl', 'r') as f:
+    with open('../data/test_gpt-4-turbo.jsonl', 'r',encoding='utf-8') as f:
         lines = f.readlines()
     bleu_scores = []
     rouge_l_p = []
