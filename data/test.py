@@ -16,11 +16,11 @@ def extract_matching_lines(source_file, test_file, output_file):
             data = json.loads(line)
             query = data['query']
             if query in test_queries:
-                out_file.write(line)
+                out_file.write( json.dumps({'query':json.loads(line)['query'],'answer':json.loads(line)['answer']}, ensure_ascii=False))
 
 if __name__ == '__main__':
     source_file = '../data/crag_data_2735.jsonl'  # 你的源文件
-    test_file = '../data/test.jsonl'      # 包含需要匹配的queries的测试文件
-    output_file = '../data/test_rag.jsonl'  # 输出文件
+    test_file = '../data/train.jsonl'      # 包含需要匹配的queries的测试文件
+    output_file = '../data/train_rag.jsonl'  # 输出文件
 
     extract_matching_lines(source_file, test_file, output_file)

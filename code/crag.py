@@ -18,8 +18,8 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 # 引入 OpenaiApiLLM 和 MyApiLLM
 from model_response import MyApiLLM, OpenaiApiLLM
 
-chunk_size = 10
-start_line = 300
+chunk_size = 100
+start_line = 0
 max_retries = 10
 retry_wait_time = 10  # seconds
 
@@ -43,6 +43,8 @@ def build_automerging_index(documents, save_dir="merging_index", chunk_sizes=Non
 
 def process_chunk(chunk, chunk_index, result_dir, similarity_top_k=12):
     result = []
+    total_time = 0
+    count = 0
     for i, line in enumerate(chunk):
         data = json.loads(line)
 
@@ -59,18 +61,23 @@ def process_chunk(chunk, chunk_index, result_dir, similarity_top_k=12):
         retry_count = 0
         while retry_count < max_retries:
             try:
+                start_time = time.time()
                 index = build_automerging_index(documents, save_dir=f'merging_index/{chunk_index*chunk_size+i}.index')
                 base_retriever = index.as_retriever(similarity_top_k=similarity_top_k)
                 retriever = AutoMergingRetriever(base_retriever, index.storage_context, verbose=True)
+                end_time = time.time()
+                total_time += (end_time - start_time)
+                count+=1
                 auto_merging_engine = RetrieverQueryEngine.from_args(retriever, node_postprocessors=[Settings.rerank_model])
-                auto_merging_response = auto_merging_engine.query(query)
+                auto_merging_response, prompt = auto_merging_engine.query(query)
                 if not auto_merging_response or not auto_merging_response.response:
                     raise ValueError("Empty response")
                 print(f'{query=}')
+                print(f'{prompt=}')
                 print(f'{auto_merging_response.response=}')
                 print(f'{answer=}')
                 data['pred'] = auto_merging_response.response
-                result.append(json.dumps({'query': query, 'answer': answer, 'pred': auto_merging_response.response}, ensure_ascii=False) + '\n')
+                result.append(json.dumps({'prompt': prompt, 'answer': answer, 'pred': auto_merging_response.response}, ensure_ascii=False) + '\n')
                 break
             except Exception as e:
                 print(f"Error processing line {i} in chunk {chunk_index}: {e}")
@@ -80,7 +87,11 @@ def process_chunk(chunk, chunk_index, result_dir, similarity_top_k=12):
                     time.sleep(retry_wait_time)
                 else:
                     print(f"Failed after {max_retries} retries. Skipping...")
-
+    if count > 0:
+        average_time = total_time / count
+        print(f"平均处理时间: {average_time:.4f} 秒")
+    else:
+        print("没有处理任何数据")
     result_file = os.path.join(result_dir, f'result_chunk_{chunk_index}.jsonl')
     with open(result_file, 'w', encoding='utf-8') as f:
         f.write(''.join(result))
@@ -96,7 +107,7 @@ def test_crag(source_file='../data/test_rag.jsonl', result_dir='../data/results'
         chunk = lines[i:i + chunk_size]
         process_chunk(chunk, i // chunk_size, result_dir)
 
-def merge_results(result_dir='../data/results', target_file='../data/test_rag_gpt-3.5-turbo.jsonl'):
+def merge_results(result_dir='../data/results', target_file='../data/test_rag_gpt-3.5-turbo_finetune.jsonl'):
     result_files = [os.path.join(result_dir, f) for f in os.listdir(result_dir) if f.startswith('result_chunk_')]
     merged_results = []
     for result_file in result_files:
